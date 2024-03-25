@@ -1,300 +1,192 @@
 <?php
 
-namespace AppBundle\Entity;
+declare(strict_types=1);
 
-use FOS\UserBundle\Model\User as BaseUser;
+namespace App\Entity;
+
+use App\Repository\DoctrineUserRepository;
+use App\Trait\IdentifierTrait;
+use App\Trait\IsActiveTrait;
+use App\Trait\TimestampableTrait;
+use App\Trait\WhoTrait;
+use DateTimeImmutable;
 use Doctrine\ORM\Mapping as ORM;
-use Symfony\Component\HttpFoundation\File\File;
-use Symfony\Component\Validator\Constraints\DateTime;
-use Vich\UploaderBundle\Mapping\Annotation as Vich;
+use Symfony\Component\Security\Core\User\PasswordAuthenticatedUserInterface;
+use Symfony\Component\Security\Core\User\UserInterface;
+use Symfony\Component\Uid\Uuid;
 
-/**
- * @ORM\Table(name="fos_user")
- * @ORM\Entity(repositoryClass="AppBundle\Repository\UserRepository")
- * @Vich\Uploadable
- */
-class User extends BaseUser
+use function array_unique;
+use function sha1;
+use function uniqid;
+
+#[ORM\Entity(repositoryClass: DoctrineUserRepository::class)]
+#[ORM\HasLifecycleCallbacks]
+class User implements UserInterface, PasswordAuthenticatedUserInterface
 {
-    /**
-     * @ORM\Id
-     * @ORM\Column(type="integer")
-     * @ORM\GeneratedValue(strategy="AUTO")
-     */
-    protected $id;
+    use IdentifierTrait;
+    use TimestampableTrait;
+    use IsActiveTrait;
+    use WhoTrait;
+
+    public const NAME_MIN_LENGTH = 2;
+    public const NAME_MAX_LENGTH = 80;
+
+    #[ORM\Column(type: 'string', length: 80)]
+    private ?string $name;
+
+    #[ORM\Column(type: 'string', length: 180, unique: true)]
+    private readonly ?string $email;
+
+    #[ORM\Column(type: 'json')]
+    private array $roles = [];
+
+    #[ORM\Column(type: 'string', length: 40, nullable: true)]
+    private ?string $token;
+
+    #[ORM\Column(type: 'string', length: 255, options: [
+        'comment' => 'The hashed password',
+    ])]
+    private ?string $password;
+
+
+    private function __construct(
+        ?string $name,
+        ?string $email,
+        ?string $password,
+        ?string $token,
+    ) {
+        $this->id = Uuid::v4()->toRfc4122();
+        $this->name = $name;
+        $this->email = $email;
+        $this->password = $password;
+        $this->token = $token;
+        $this->isActive = false;
+        $this->createdOn = new DateTimeImmutable();
+        $this->markAsUpdated();
+    }
+
+    public static function create($name, $email, $password): self
+    {
+        return new User(
+            $name,
+            $email,
+            $password,
+            sha1(uniqid()),
+        );
+    }
+
+    public function getId(): ?string
+    {
+        return $this->id;
+    }
+
+    public function getName(): ?string
+    {
+        return $this->name;
+    }
+
+    public function setName(?string $name): void
+    {
+        $this->name = $name;
+    }
+
+    public function getToken(): ?string
+    {
+        return $this->token;
+    }
+
+    public function setToken(?string $token): void
+    {
+        $this->token = $token;
+    }
+
+    public function getEmail(): ?string
+    {
+        return $this->email;
+    }
 
     /**
-     * @var string
+     * A visual identifier that represents this user.
      *
-     * @ORM\Column(name="nome", type="string", length=55, unique=false, nullable=true)
+     * @see UserInterface
      */
-    private $nome;
-
-    /**
-     * @var string
-     *
-     * @ORM\Column(name="sobrenome", type="string", length=255, unique=false, nullable=true)
-     */
-    private $sobrenome;
-
-    /**
-     * @var DateTime
-     *
-     * @ORM\Column(name="updated_at", type="datetime", nullable=true)
-     */
-    private $updatedAt;
-
-    /**
-     * @var string
-     *
-     * @ORM\Column(name="avatar", type="string", length=100, nullable=true)
-     */
-    private $avatar;
-
-    /**
-     * @ORM\Column(type="string", length=255, nullable=true)
-     * @var string
-     */
-    private $image;
-
-    /**
-     * @Vich\UploadableField(mapping="avatar_upload", fileNameProperty="image")
-     * @var File
-     */
-    private $imageFile;
-
-    /**
-     * @ORM\ManyToOne(targetEntity="Cliente", inversedBy="usuarios")
-     * @ORM\JoinColumn(name="empresa", referencedColumnName="id")
-     */
-    protected $empresa;
-
-    /**
-     * @ORM\OneToOne(targetEntity="Profile", cascade={"persist", "remove"})
-     * @ORM\JoinColumn(name="profile_id", referencedColumnName="id")
-     */
-    private $profile;
-    
-    /**
-     * @ORM\OneToOne(targetEntity="Endereco", cascade={"persist", "remove"})
-     * @ORM\JoinColumn(name="endereco_id", referencedColumnName="id")
-     */
-    private $endereco;
-
-    public function __construct()
+    public function getUserIdentifier(): string
     {
-        parent::__construct();
-        $this->nomeCompleto();
+        return (string) $this->email;
     }
 
-    private function nomeCompleto()
+    /**
+     * @deprecated since Symfony 5.3, use getUserIdentifier instead
+     */
+    public function getUsername(): string
     {
-        $nomeCompleto = $this->nome.' '.$this->sobrenome;
-
-        if ($nomeCompleto == '') {
-            $nomeCompleto = $this->username;
-        }
-        return $nomeCompleto;
+        return (string) $this->email;
     }
-
-    public function getNomeCompleto()
-    {
-        return $this->nomeCompleto();
-    }
-
-    public function setImageFile(File $image = null)
-    {
-        $this->imageFile = $image;
-
-        // VERY IMPORTANT:
-        // It is required that at least one field changes if you are using Doctrine,
-        // otherwise the event listeners won't be called and the file is lost
-        if ($image) {
-            // if 'updatedAt' is not defined in your entity, use another property
-            $this->updatedAt = new \DateTime('now');
-        }
-    }
-
-    public function getImageFile()
-    {
-        return $this->imageFile;
-    }
-
-    public function setImage($image)
-    {
-        $this->image = $image;
-    }
-
-    public function getImage()
-    {
-        return $this->image;
-    }
-
 
     /**
-     * Set nome.
-     *
-     * @param string|null $nome
-     *
-     * @return User
+     * @see UserInterface
      */
-    public function setNome($nome = null)
+    public function getRoles(): array
     {
-        $this->nome = $nome;
+        $roles = $this->roles;
+        // guarantee every user at least has ROLE_USER
+        $roles[] = 'ROLE_USER';
+
+        return array_unique($roles);
+    }
+
+    public function setRoles(array $roles): self
+    {
+        $this->roles = $roles;
 
         return $this;
     }
 
     /**
-     * Get nome.
-     *
-     * @return string|null
+     * @see PasswordAuthenticatedUserInterface
      */
-    public function getNome()
+    public function getPassword(): string
     {
-        return $this->nome;
+        return $this->password;
     }
 
-    /**
-     * Set sobrenome.
-     *
-     * @param string|null $sobrenome
-     *
-     * @return User
-     */
-    public function setSobrenome($sobrenome = null)
+    public function setPassword(string $password): self
     {
-        $this->sobrenome = $sobrenome;
+        $this->password = $password;
 
         return $this;
     }
 
     /**
-     * Get sobrenome.
+     * Returning a salt is only needed, if you are not using a modern
+     * hashing algorithm (e.g. bcrypt or sodium) in your security.yaml.
      *
-     * @return string|null
+     * @see UserInterface
      */
-    public function getSobrenome()
+    public function getSalt(): ?string
     {
-        return $this->sobrenome;
+        return null;
     }
 
     /**
-     * Set avatar.
-     *
-     * @param string|null $avatar
-     *
-     * @return User
+     * @see UserInterface
      */
-    public function setAvatar($avatar = null)
+    public function eraseCredentials(): void
     {
-        $this->avatar = $avatar;
-
-        return $this;
+        // If you store any temporary, sensitive data on the user, clear it here
+        // $this->plainPassword = null;
     }
 
-    /**
-     * Get avatar.
-     *
-     * @return string|null
-     */
-    public function getAvatar()
+    public function toArray(): array
     {
-        return $this->avatar;
+        return [
+            'id' => $this->id,
+            'name' => $this->name,
+        ];
     }
 
-    /**
-     * Set empresa.
-     *
-     * @param \AppBundle\Entity\Cliente|null $empresa
-     *
-     * @return User
-     */
-    public function setEmpresa(\AppBundle\Entity\Cliente $empresa = null)
+    public function equals(User $user): bool
     {
-        $this->empresa = $empresa;
-
-        return $this;
-    }
-
-    /**
-     * Get empresa.
-     *
-     * @return \AppBundle\Entity\Cliente|null
-     */
-    public function getEmpresa()
-    {
-        return $this->empresa;
-    }
-
-    /**
-     * Set profile.
-     *
-     * @param \AppBundle\Entity\Profile|null $profile
-     *
-     * @return User
-     */
-    public function setProfile(\AppBundle\Entity\Profile $profile = null)
-    {
-        $this->profile = $profile;
-
-        return $this;
-    }
-
-    /**
-     * Get profile.
-     *
-     * @return \AppBundle\Entity\Profile|null
-     */
-    public function getProfile()
-    {
-        return $this->profile;
-    }
-
-    /**
-     * Set endereco.
-     *
-     * @param \AppBundle\Entity\Endereco|null $endereco
-     *
-     * @return User
-     */
-    public function setEndereco(\AppBundle\Entity\Endereco $endereco = null)
-    {
-        $this->endereco = $endereco;
-
-        return $this;
-    }
-
-    /**
-     * Get endereco.
-     *
-     * @return \AppBundle\Entity\Endereco|null
-     */
-    public function getEndereco()
-    {
-        return $this->endereco;
-    }
-
-    /**
-     * Set updatedAt.
-     *
-     * @param \DateTime|null $updatedAt
-     *
-     * @return User
-     */
-    public function setUpdatedAt($updatedAt = null)
-    {
-        $this->updatedAt = $updatedAt;
-
-        return $this;
-    }
-
-    /**
-     * Get updatedAt.
-     *
-     * @return \DateTime|null
-     */
-    public function getUpdatedAt()
-    {
-        return $this->updatedAt;
+        return $this->getId() === $user->getId();
     }
 }

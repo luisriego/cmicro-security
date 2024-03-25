@@ -35,6 +35,13 @@ RUN mkdir -p /var/www/html
 # Config XDEBUG
 COPY xdebug.ini /usr/local/etc/php/conf.d/xdebug.ini
 
+# Install NODE 14 and Yarn
+RUN curl -sL https://deb.nodesource.com/setup_14.x | bash -
+RUN apt -y install nodejs
+RUN curl -sL https://dl.yarnpkg.com/debian/pubkey.gpg | apt-key add -
+RUN echo "deb https://dl.yarnpkg.com/debian/ stable main" | tee /etc/apt/sources.list.d/yarn.list
+RUN apt update && apt install yarn
+
 # Update Apache config
 COPY ./default.conf /etc/apache2/sites-available/default.conf
 RUN echo "ServerName localhost" >> /etc/apache2/apache2.conf \
